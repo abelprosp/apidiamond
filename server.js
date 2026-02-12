@@ -1,4 +1,6 @@
 const http = require('http');
+const { fetchVariosImoveis, filtrarImoveis } = require('./lib/imoveis');
+const { extrairCriterios } = require('./lib/ia');
 
 const BASE_URL = 'https://imobiliariadiamond.com.br/wp-json/imob/v1/imoveis';
 const BEARER = process.env.BEARER_TOKEN || 'Ot3CYy0xWgK52DW3UgQ1hPcEbDRrmteRfEET3uvUZwtJBqSXFQC4Wti0Jt3IPX45';
@@ -24,12 +26,21 @@ async function fetchImoveis(page = 1, perPage = 20) {
   return res.json();
 }
 
+function readBody(req) {
+  return new Promise((resolve, reject) => {
+    let data = '';
+    req.on('data', (chunk) => { data += chunk; });
+    req.on('end', () => resolve(data));
+    req.on('error', reject);
+  });
+}
+
 const server = http.createServer(async (req, res) => {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
   res.setHeader('Access-Control-Allow-Origin', '*');
 
   if (req.method === 'OPTIONS') {
-    res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
     res.writeHead(204);
     res.end();
@@ -42,12 +53,40 @@ const server = http.createServer(async (req, res) => {
   const perPage = Math.min(100, Math.max(1, parseInt(url.searchParams.get('per_page') || '20', 10)));
 
   const isImoveis = path === '/imoveis' || path === '/' || path === '/webhook';
+  const isBuscar = path === '/buscar';
+
+  if (isBuscar && req.method === 'POST') {
+    try {
+      const raw = await readBody(req);
+      const body = raw ? JSON.parse(raw) : {};
+      const pergunta = body.pergunta || body.mensagem || body.message || body.query || '';
+      if (!pergunta.trim()) {
+        res.writeHead(400);
+        return res.end(JSON.stringify({ error: 'Bad Request', message: 'Envie "pergunta" no body.' }));
+      }
+      const criterios = await extrairCriterios(pergunta);
+      const maxPages = Math.min(5, parseInt(process.env.BUSCAR_MAX_PAGINAS || '3', 10));
+      const todos = await fetchVariosImoveis(maxPages, 20);
+      const imoveis = filtrarImoveis(todos, criterios);
+      res.writeHead(200);
+      return res.end(JSON.stringify({
+        pergunta: pergunta.trim(),
+        criterios,
+        total: imoveis.length,
+        imoveis: imoveis.slice(0, 20),
+      }));
+    } catch (err) {
+      console.error(err);
+      res.writeHead(502);
+      return res.end(JSON.stringify({ error: 'Bad Gateway', message: err.message }));
+    }
+  }
 
   if (req.method !== 'GET' || !isImoveis) {
     res.writeHead(404);
     res.end(JSON.stringify({
       error: 'Not Found',
-      message: 'Use GET /imoveis ou GET /?page=1&per_page=20',
+      message: 'GET /imoveis ou POST /buscar com { "pergunta": "..." }',
     }));
     return;
   }
