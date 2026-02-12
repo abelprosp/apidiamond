@@ -1,0 +1,13 @@
+{
+  "name": "diamond-imoveis-api",
+  "version": "1.0.0",
+  "description": "API webhook para consulta de imóveis Imobiliária Diamond",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
